@@ -1,25 +1,10 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import '../models/usuario.dart';
 import '../services/api_service.dart';
 import '../theme/app_themes.dart';
 
-class ContaUsuario {
-  final String nome;
-  final String email;
-  final String cidade;
-  final String estado;
-  final String provedor; // 'email', 'google', 'x'
-  final bool isGestor;
-
-  const ContaUsuario({
-    required this.nome,
-    required this.email,
-    this.cidade = 'São José',
-    this.estado = 'SC',
-    this.provedor = 'email',
-    this.isGestor = false,
-  });
-}
+export '../models/usuario.dart';
 
 class LoginScreen extends StatefulWidget {
   final ApiService api;
@@ -103,6 +88,10 @@ class _LoginScreenState extends State<LoginScreen> {
             password: senha,
           );
           if (!mounted) return;
+          final token = dados['access_token']?.toString();
+          if (token != null) {
+            widget.api.definirToken(token);
+          }
           final usuario = ContaUsuario(
             nome: (dados['nome'] ?? email.split('@').first).toString(),
             email: (dados['email'] ?? email).toString(),
@@ -110,6 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
             estado: (dados['estado'] ?? 'SC').toString(),
             isGestor: dados['is_gestor'] == true,
             provedor: 'email',
+            token: token,
           );
           widget.onUsuarioChanged(usuario);
         } catch (_) {
@@ -156,41 +146,66 @@ class _LoginScreenState extends State<LoginScreen> {
       _mensagemErro = null;
     });
 
-    await Future<void>.delayed(const Duration(milliseconds: 450));
-    if (!mounted) return;
-
-    final conta = provedor == 'google'
-        ? const ContaUsuario(
-            nome: 'Marcelo (Google)',
-            email: 'marcelo@gmail.com',
-            cidade: 'São José',
-            estado: 'SC',
-            provedor: 'google',
-          )
-        : const ContaUsuario(
-            nome: 'Marcelo (@marcelo_x)',
-            email: 'marcelo@x.com',
-            cidade: 'São José',
-            estado: 'SC',
-            provedor: 'x',
-          );
-
-    setState(() {
-      _carregando = false;
-      _provedorCarregando = null;
-    });
-
-    widget.onUsuarioChanged(conta);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          provedor == 'google'
-              ? 'Conectado com sucesso via Google!'
-              : 'Conectado com sucesso via X!',
+    try {
+      final email = provedor == 'google'
+          ? 'marceloflorindo@gmail.com'
+          : 'usuario0001@saojose.sc.gov.br';
+      final usuario = await widget.api.autenticarDemonstracaoRapida(
+        email: email,
+        senha: '123456',
+      );
+      if (!mounted) return;
+      final contaComProvedor = ContaUsuario(
+        nome: usuario.nome,
+        email: usuario.email,
+        cidade: usuario.cidade,
+        estado: usuario.estado,
+        isGestor: usuario.isGestor,
+        provedor: provedor,
+        token: usuario.token,
+      );
+      widget.onUsuarioChanged(contaComProvedor);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            provedor == 'google'
+                ? 'Conectado com sucesso via Google!'
+                : 'Conectado com sucesso via X!',
+          ),
+          behavior: SnackBarBehavior.floating,
         ),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+      );
+    } catch (_) {
+      // Fallback em ambiente de teste ou sem rede
+      final mockToken = 'mock-jwt-token-$provedor';
+      widget.api.definirToken(mockToken);
+      final conta = provedor == 'google'
+          ? ContaUsuario(
+              nome: 'Marcelo (Google)',
+              email: 'marceloflorindo@gmail.com',
+              cidade: 'São José',
+              estado: 'SC',
+              provedor: 'google',
+              token: mockToken,
+            )
+          : ContaUsuario(
+              nome: 'Marcelo (@marcelo_x)',
+              email: 'marcelo@x.com',
+              cidade: 'São José',
+              estado: 'SC',
+              provedor: 'x',
+              token: mockToken,
+            );
+      if (!mounted) return;
+      widget.onUsuarioChanged(conta);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _carregando = false;
+          _provedorCarregando = null;
+        });
+      }
+    }
   }
 
   void _abrirModalRecuperarSenha() {
@@ -255,7 +270,10 @@ class _LoginScreenState extends State<LoginScreen> {
       return _PainelUsuarioAutenticado(
         usuario: widget.usuarioAtual!,
         tema: widget.tema,
-        onSair: () => widget.onUsuarioChanged(null),
+        onSair: () {
+          widget.api.limparAutenticacao();
+          widget.onUsuarioChanged(null);
+        },
       );
     }
 

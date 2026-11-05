@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'models/usuario.dart';
 import 'screens/explorar_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/mapa_radar_screen.dart';
@@ -7,6 +8,7 @@ import 'services/api_service.dart';
 import 'theme/app_themes.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const RedeSocialMapaApp());
 }
 
@@ -70,10 +72,129 @@ class _RedeSocialHomeShellState extends State<RedeSocialHomeShell> {
   void initState() {
     super.initState();
     _api = widget.apiService ?? ApiService();
+    _restaurarSessao();
+  }
+
+  Future<void> _restaurarSessao() async {
+    final token = await _api.carregarTokenSalvo();
+    final usuario = await _api.carregarUsuarioSalvo();
+    if (token != null && usuario != null && mounted) {
+      setState(() {
+        _usuarioAtual = usuario;
+      });
+    }
   }
 
   void _forcarAtualizacao() {
     setState(() => _refreshToken++);
+  }
+
+  Future<void> _confirmarSaida() async {
+    final confirmar = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFCBD5E1),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEE2E2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.logout_rounded, color: Color(0xFFDC2626), size: 20),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Encerrar Sessão',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Deseja realmente sair da conta de ${_usuarioAtual?.nome ?? "Morador"}?',
+              style: const TextStyle(fontSize: 14, color: Color(0xFF475569)),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626),
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              icon: const Icon(Icons.logout_rounded, size: 18),
+              label: const Text(
+                'Sim, sair da conta',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancelar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmar == true && mounted) {
+      setState(() {
+        _usuarioAtual = null;
+        _abaSelecionada = 0;
+      });
+      _api.limparAutenticacao();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sessão encerrada com sucesso.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _tratarTrocaDeAba(int idx) {
+    if (idx == 3 && _usuarioAtual != null) {
+      _confirmarSaida();
+      return;
+    }
+    setState(() => _abaSelecionada = idx);
   }
 
   @override
@@ -83,11 +204,17 @@ class _RedeSocialHomeShellState extends State<RedeSocialHomeShell> {
         api: _api,
         tema: widget.temaAtual,
         refreshToken: _refreshToken,
+        onUsuarioChanged: (novoUsuario) {
+          setState(() => _usuarioAtual = novoUsuario);
+        },
       ),
       MapaRadarScreen(
         api: _api,
         tema: widget.temaAtual,
         refreshToken: _refreshToken,
+        onUsuarioChanged: (novoUsuario) {
+          setState(() => _usuarioAtual = novoUsuario);
+        },
       ),
       ParceirosScreen(
         api: _api,
@@ -186,27 +313,35 @@ class _RedeSocialHomeShellState extends State<RedeSocialHomeShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _abaSelecionada,
-        onDestinationSelected: (idx) => setState(() => _abaSelecionada = idx),
-        destinations: const [
-          NavigationDestination(
+        onDestinationSelected: _tratarTrocaDeAba,
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.explore_outlined),
             selectedIcon: Icon(Icons.explore_rounded),
             label: 'Explorar',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.map_outlined),
             selectedIcon: Icon(Icons.map_rounded),
             label: 'Mapa Radar',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.workspace_premium_outlined),
             selectedIcon: Icon(Icons.workspace_premium_rounded),
             label: 'Parceiros',
           ),
           NavigationDestination(
-            icon: Icon(Icons.person_outline_rounded),
-            selectedIcon: Icon(Icons.person_rounded),
-            label: 'Entrar',
+            icon: Icon(
+              _usuarioAtual != null
+                  ? Icons.logout_rounded
+                  : Icons.person_outline_rounded,
+            ),
+            selectedIcon: Icon(
+              _usuarioAtual != null
+                  ? Icons.logout_rounded
+                  : Icons.person_rounded,
+            ),
+            label: _usuarioAtual != null ? 'Sair' : 'Entrar',
           ),
         ],
       ),

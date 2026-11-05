@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/anuncio.dart';
 import '../models/evento.dart';
+import '../models/usuario.dart';
 
 class ApiService {
   static const String _envUrl = String.fromEnvironment('API_BASE_URL');
@@ -11,6 +13,9 @@ class ApiService {
     defaultValue:
         '',
   );
+  static const String _chaveToken = 'auth_token';
+  static const String _chaveUsuario = 'usuario_logado';
+
   String? _cachedMapboxToken;
 
   static String get baseUrl {
@@ -36,8 +41,59 @@ class ApiService {
   }
 
   final http.Client _client;
+  String? _authToken;
 
-  ApiService({http.Client? client}) : _client = client ?? http.Client();
+  ApiService({http.Client? client, String? authToken})
+      : _client = client ?? http.Client(),
+        _authToken = authToken;
+
+  String? get authToken => _authToken;
+  bool get estaAutenticado => _authToken != null && _authToken!.trim().isNotEmpty;
+
+  void definirToken(String? token) {
+    _authToken = token;
+  }
+
+  Future<void> salvarSessao(String token, [ContaUsuario? usuario]) async {
+    _authToken = token;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_chaveToken, token);
+      if (usuario != null) {
+        await prefs.setString(_chaveUsuario, usuario.toJsonString());
+      }
+    } catch (_) {}
+  }
+
+  Future<String?> carregarTokenSalvo() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString(_chaveToken);
+      if (token != null && token.isNotEmpty) {
+        _authToken = token;
+        return token;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<ContaUsuario?> carregarUsuarioSalvo() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_chaveUsuario);
+      return ContaUsuario.fromJsonString(raw);
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> limparAutenticacao() async {
+    _authToken = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_chaveToken);
+      await prefs.remove(_chaveUsuario);
+    } catch (_) {}
+  }
 
   Future<List<Evento>> listarEventos({
     String? categoria,
@@ -186,6 +242,154 @@ class ApiService {
       } catch (_) {}
       throw Exception(mensagem);
     }
+    final dados =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    if (dados['access_token'] != null) {
+      final token = dados['access_token'].toString();
+      _authToken = token;
+      final usuario = ContaUsuario(
+        nome: (dados['nome'] ?? email.split('@').first).toString(),
+        email: (dados['email'] ?? email).toString(),
+        cidade: (dados['cidade'] ?? 'São José').toString(),
+        estado: (dados['estado'] ?? 'SC').toString(),
+        isGestor: dados['is_gestor'] == true,
+        provedor: 'email',
+        token: token,
+      );
+      await salvarSessao(token, usuario);
+    }
+    return dados;
+  }
+
+  /// Autenticação rápida de demonstração conectando diretamente na API
+  Future<ContaUsuario> autenticarDemonstracaoRapida({
+    String email = 'marceloflorindo@gmail.com',
+    String senha = '123456',
+  }) async {
+    final dados = await autenticarComEmailSenha(
+      email: email,
+      password: senha,
+    );
+    final token = (dados['access_token'] ?? '').toString();
+    final usuario = ContaUsuario(
+      nome: (dados['nome'] ?? 'Marcelo').toString(),
+      email: (dados['email'] ?? email).toString(),
+      cidade: (dados['cidade'] ?? 'São José').toString(),
+      estado: (dados['estado'] ?? 'SC').toString(),
+      isGestor: dados['is_gestor'] == true,
+      provedor: 'email',
+      token: token,
+    );
+    await salvarSessao(token, usuario);
+    return usuario;
+  }
+
+  /// Registra ou alterna reação de apoio (like) ou discordância (dislike) em um evento
+  Future<Map<String, dynamic>> reagirEvento({
+    required int eventoId,
+    required String tipo, // 'apoiar' / 'like' ou 'discordar' / 'dislike'
+  }) async {
+    final uri = Uri.parse('$baseUrl/eventos/$eventoId/curtir');
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (_authToken != null && _authToken!.isNotEmpty)
+        'Authorization': 'Bearer $_authToken',
+    };
+    final response = await _client.post(
+      uri,
+      headers: headers,
+      body: jsonEncode({
+        'tipo': tipo,
+      }),
+    );
+    if (response.statusCode != 200) {
+      String mensagem = 'Erro ao registrar reação.';
+      if (response.statusCode == 401) {
+        mensagem = 'Você precisa estar logado para apoiar ou discordar.';
+      } else {
+        try {
+          final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+          if (decoded is Map<String, dynamic> && decoded['detail'] != null) {
+            mensagem = decoded['detail'].toString();
+          }
+        } catch (_) {}
+      }
+      throw Exception(mensagem);
+    }
     return jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  /// Registra reação em um comentário de evento
+  Future<Map<String, dynamic>> reagirComentario({
+    required int comentarioId,
+    required String tipo,
+  }) async {
+    final uri = Uri.parse('$baseUrl/eventos/comentarios/$comentarioId/curtir');
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (_authToken != null && _authToken!.isNotEmpty)
+        'Authorization': 'Bearer $_authToken',
+    };
+    final response = await _client.post(
+      uri,
+      headers: headers,
+      body: jsonEncode({
+        'tipo': tipo,
+      }),
+    );
+    if (response.statusCode != 200) {
+      String mensagem = 'Erro ao registrar reação no comentário.';
+      if (response.statusCode == 401) {
+        mensagem = 'Você precisa estar logado para reagir aos comentários.';
+      } else {
+        try {
+          final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+          if (decoded is Map<String, dynamic> && decoded['detail'] != null) {
+            mensagem = decoded['detail'].toString();
+          }
+        } catch (_) {}
+      }
+      throw Exception(mensagem);
+    }
+    return jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  /// Adiciona um novo comentário a um evento
+  Future<ComentarioEvento> adicionarComentario({
+    required int eventoId,
+    required String texto,
+    int? paiId,
+  }) async {
+    final uri = Uri.parse('$baseUrl/eventos/$eventoId/comentarios');
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (_authToken != null && _authToken!.isNotEmpty)
+        'Authorization': 'Bearer $_authToken',
+    };
+    final response = await _client.post(
+      uri,
+      headers: headers,
+      body: jsonEncode({
+        'texto': texto.trim(),
+        if (paiId != null) 'pai_id': paiId,
+      }),
+    );
+    if (response.statusCode != 201 && response.statusCode != 200) {
+      String mensagem = 'Erro ao enviar comentário.';
+      if (response.statusCode == 401) {
+        mensagem = 'Você precisa estar logado para comentar.';
+      } else {
+        try {
+          final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+          if (decoded is Map<String, dynamic> && decoded['detail'] != null) {
+            mensagem = decoded['detail'].toString();
+          }
+        } catch (_) {}
+      }
+      throw Exception(mensagem);
+    }
+    final dados =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    return ComentarioEvento.fromJson(dados);
   }
 }

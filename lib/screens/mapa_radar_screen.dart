@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../models/anuncio.dart';
 import '../models/evento.dart';
+import '../models/usuario.dart';
 import '../services/api_service.dart';
 import '../theme/app_themes.dart';
 import '../widgets/evento_detalhe_sheet.dart';
@@ -14,12 +15,14 @@ class MapaRadarScreen extends StatefulWidget {
   final ApiService api;
   final AppThemeOption tema;
   final int refreshToken;
+  final ValueChanged<ContaUsuario?>? onUsuarioChanged;
 
   const MapaRadarScreen({
     super.key,
     required this.api,
     required this.tema,
     this.refreshToken = 0,
+    this.onUsuarioChanged,
   });
 
   @override
@@ -526,32 +529,99 @@ class _MapaRadarScreenState extends State<MapaRadarScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 7),
-                    SizedBox(
-                      height: 34,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        children: CategoriaFiltro.todas.map((cat) {
-                          final sel = _categoriaFiltro == cat.slug;
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: ChoiceChip(
-                              selected: sel,
-                              showCheckmark: false,
-                              visualDensity: VisualDensity.compact,
-                              label: Text('${cat.icone} ${cat.nome}'),
-                              onSelected: (_) {
-                                setState(() {
-                                  _categoriaFiltro = cat.slug;
-                                  _eventoSelecionado = null;
-                                  _clusterSelecionado = const [];
-                                });
-                                _buscarEventosDaArea();
-                              },
+                    const SizedBox(height: 6),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Container(
+                        height: 38,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _categoriaFiltro,
+                            isExpanded: true,
+                            borderRadius: BorderRadius.circular(16),
+                            dropdownColor: Colors.white,
+                            icon: Icon(
+                              Icons.unfold_more_rounded,
+                              size: 19,
+                              color: widget.tema.seedColor,
                             ),
-                          );
-                        }).toList(),
+                            selectedItemBuilder: (context) {
+                              return CategoriaFiltro.todas.map((cat) {
+                                final label = cat.slug.isEmpty
+                                    ? 'Todas as Categorias'
+                                    : cat.nome;
+                                return Row(
+                                  children: [
+                                    Text(cat.icone, style: const TextStyle(fontSize: 15)),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Categoria: $label',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: cat.slug.isEmpty
+                                              ? const Color(0xFF334155)
+                                              : widget.tema.seedColor,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              }).toList();
+                            },
+                            items: CategoriaFiltro.todas.map((cat) {
+                              final sel = _categoriaFiltro == cat.slug;
+                              final label = cat.slug.isEmpty
+                                  ? 'Todas as Categorias'
+                                  : cat.nome;
+                              return DropdownMenuItem<String>(
+                                value: cat.slug,
+                                child: Row(
+                                  children: [
+                                    Text(cat.icone, style: const TextStyle(fontSize: 16)),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: sel ? FontWeight.w800 : FontWeight.w500,
+                                          color: sel ? widget.tema.seedColor : const Color(0xFF1E293B),
+                                        ),
+                                      ),
+                                    ),
+                                    if (sel)
+                                      Icon(
+                                        Icons.check_rounded,
+                                        size: 17,
+                                        color: widget.tema.seedColor,
+                                      ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (novoSlug) {
+                              if (novoSlug == null) return;
+                              setState(() {
+                                _categoriaFiltro = novoSlug;
+                                _eventoSelecionado = null;
+                                _clusterSelecionado = const [];
+                              });
+                              _buscarEventosDaArea();
+                            },
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -710,6 +780,8 @@ class _MapaRadarScreenState extends State<MapaRadarScreen> {
             bottom: 12,
             child: _PreviewCardEventoFlutuante(
               evento: _eventoSelecionado!,
+              api: widget.api,
+              onUsuarioChanged: widget.onUsuarioChanged,
               corTema: widget.tema.seedColor,
               totalNoCluster: _clusterSelecionado.length,
               indiceNoCluster: _indiceNoCluster,
@@ -731,6 +803,7 @@ class _MapaRadarScreenState extends State<MapaRadarScreen> {
                 context,
                 evento: _eventoSelecionado!,
                 api: widget.api,
+                onUsuarioChanged: widget.onUsuarioChanged,
               ),
             ),
           )
@@ -859,8 +932,10 @@ class _PinoClusterEventos extends StatelessWidget {
   }
 }
 
-class _PreviewCardEventoFlutuante extends StatelessWidget {
+class _PreviewCardEventoFlutuante extends StatefulWidget {
   final Evento evento;
+  final ApiService api;
+  final ValueChanged<ContaUsuario?>? onUsuarioChanged;
   final Color corTema;
   final int totalNoCluster;
   final int indiceNoCluster;
@@ -870,6 +945,8 @@ class _PreviewCardEventoFlutuante extends StatelessWidget {
 
   const _PreviewCardEventoFlutuante({
     required this.evento,
+    required this.api,
+    this.onUsuarioChanged,
     required this.corTema,
     required this.totalNoCluster,
     required this.indiceNoCluster,
@@ -879,7 +956,255 @@ class _PreviewCardEventoFlutuante extends StatelessWidget {
   });
 
   @override
+  State<_PreviewCardEventoFlutuante> createState() =>
+      _PreviewCardEventoFlutuanteState();
+}
+
+class _PreviewCardEventoFlutuanteState
+    extends State<_PreviewCardEventoFlutuante> {
+  int? _curtidasOverride;
+  int? _dislikesOverride;
+  String? _reacaoSelecionada;
+  bool _enviandoReacao = false;
+  String? _tipoCarregando;
+
+  @override
+  void didUpdateWidget(covariant _PreviewCardEventoFlutuante oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.evento.id != widget.evento.id) {
+      _curtidasOverride = null;
+      _dislikesOverride = null;
+      _reacaoSelecionada = null;
+      _enviandoReacao = false;
+      _tipoCarregando = null;
+    }
+  }
+
+  Future<void> _solicitarLogin(String tipo) async {
+    final acao = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(22, 16, 22, 28),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 44,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFCBD5E1),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2563EB).withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.lock_person_rounded,
+                    size: 26,
+                    color: Color(0xFF2563EB),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Entre para apoiar este relato',
+                        style: TextStyle(
+                          fontSize: 16.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Participe da rede colaborativa da cidade',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Para registrar sua opinião em relatos de infraestrutura e serviços públicos em São José, é necessário identificar-se.',
+              style: TextStyle(
+                fontSize: 13.5,
+                height: 1.45,
+                color: Color(0xFF334155),
+              ),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              icon: const Icon(Icons.bolt_rounded, size: 20),
+              label: const Text(
+                'Entrar com 1 toque (Marcelo)',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              ),
+              onPressed: () => Navigator.of(ctx).pop('marcelo'),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              icon: const Icon(Icons.person_outline_rounded, size: 19),
+              label: const Text(
+                'Entrar como Cidadão Demo',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+              ),
+              onPressed: () => Navigator.of(ctx).pop('cidadao'),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(null),
+              child: const Text('Agora não', style: TextStyle(color: Color(0xFF64748B))),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (acao == null || !mounted) return;
+
+    final email = acao == 'marcelo'
+        ? 'marceloflorindo@gmail.com'
+        : 'usuario0001@saojose.sc.gov.br';
+
+    setState(() {
+      _enviandoReacao = true;
+      _tipoCarregando = tipo;
+    });
+
+    try {
+      final usuario = await widget.api.autenticarDemonstracaoRapida(
+        email: email,
+        senha: '123456',
+      );
+      if (!mounted) return;
+      widget.onUsuarioChanged?.call(usuario);
+      await _alternarReacao(tipo);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao autenticar: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      setState(() {
+        _enviandoReacao = false;
+        _tipoCarregando = null;
+      });
+    }
+  }
+
+  Future<void> _alternarReacao(String tipo) async {
+    if (_enviandoReacao && _tipoCarregando == tipo) return;
+
+    if (!widget.api.estaAutenticado) {
+      await _solicitarLogin(tipo);
+      return;
+    }
+
+    setState(() {
+      _enviandoReacao = true;
+      _tipoCarregando = tipo;
+    });
+
+    try {
+      final resultado = await widget.api.reagirEvento(
+        eventoId: widget.evento.id,
+        tipo: tipo,
+      );
+      if (!mounted) return;
+
+      final acao = resultado['acao']?.toString();
+      String aviso = 'Reação atualizada.';
+      if (acao == 'adicionado') {
+        aviso = (tipo == 'apoiar' || tipo == 'like')
+            ? 'Você apoiou este relato! 👍'
+            : 'Você discordou deste relato. 👎';
+      } else if (acao == 'alterado') {
+        aviso = (tipo == 'apoiar' || tipo == 'like')
+            ? 'Reação alterada para Apoiar! 👍'
+            : 'Reação alterada para Discordar. 👎';
+      } else if (acao == 'removido') {
+        aviso = 'Reação removida.';
+      }
+
+      setState(() {
+        _curtidasOverride = resultado['curtidas'] as int?;
+        _dislikesOverride = resultado['dislikes'] as int?;
+        _reacaoSelecionada = resultado['tipo'] as String?;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(aviso),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _enviandoReacao = false;
+          _tipoCarregando = null;
+        });
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final evento = widget.evento;
+    final corTema = widget.corTema;
+    final totalNoCluster = widget.totalNoCluster;
+    final indiceNoCluster = widget.indiceNoCluster;
+    final onProximoNoCluster = widget.onProximoNoCluster;
+    final onFechar = widget.onFechar;
+    final onVerDetalhes = widget.onVerDetalhes;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1030,18 +1355,34 @@ class _PreviewCardEventoFlutuante extends StatelessWidget {
           const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  '👍 ${evento.curtidas}   👎 ${evento.dislikes}   💬 ${evento.comentarios}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF475569),
-                  ),
-                ),
+              _PillBotaoReacaoMapa(
+                emoji: '👍',
+                valor: _curtidasOverride ?? evento.curtidas,
+                ativo: _reacaoSelecionada == 'like' ||
+                    _reacaoSelecionada == 'apoiar',
+                corAtiva: const Color(0xFF15803D),
+                carregando: _enviandoReacao && _tipoCarregando == 'apoiar',
+                onTap: () => _alternarReacao('apoiar'),
               ),
+              const SizedBox(width: 6),
+              _PillBotaoReacaoMapa(
+                emoji: '👎',
+                valor: _dislikesOverride ?? evento.dislikes,
+                ativo: _reacaoSelecionada == 'dislike' ||
+                    _reacaoSelecionada == 'discordar',
+                corAtiva: const Color(0xFFB91C1C),
+                carregando: _enviandoReacao && _tipoCarregando == 'discordar',
+                onTap: () => _alternarReacao('discordar'),
+              ),
+              const SizedBox(width: 6),
+              _PillBotaoReacaoMapa(
+                emoji: '💬',
+                valor: evento.comentarios,
+                ativo: false,
+                corAtiva: const Color(0xFF334155),
+                onTap: onVerDetalhes,
+              ),
+              const Spacer(),
               FilledButton.tonalIcon(
                 onPressed: onVerDetalhes,
                 style: FilledButton.styleFrom(
@@ -1056,6 +1397,70 @@ class _PreviewCardEventoFlutuante extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PillBotaoReacaoMapa extends StatelessWidget {
+  final String emoji;
+  final int valor;
+  final bool ativo;
+  final Color corAtiva;
+  final bool carregando;
+  final VoidCallback onTap;
+
+  const _PillBotaoReacaoMapa({
+    required this.emoji,
+    required this.valor,
+    required this.ativo,
+    required this.corAtiva,
+    this.carregando = false,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: ativo ? corAtiva.withValues(alpha: 0.12) : const Color(0xFFF1F5F9),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: carregando ? null : onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: ativo ? corAtiva : const Color(0xFFE2E8F0),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (carregando)
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.8,
+                    valueColor: AlwaysStoppedAnimation<Color>(corAtiva),
+                  ),
+                )
+              else
+                Text(emoji, style: const TextStyle(fontSize: 13)),
+              const SizedBox(width: 4),
+              Text(
+                '$valor',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: ativo ? corAtiva : const Color(0xFF334155),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

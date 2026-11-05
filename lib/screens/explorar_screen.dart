@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/anuncio.dart';
 import '../models/evento.dart';
+import '../models/usuario.dart';
 import '../services/api_service.dart';
 import '../theme/app_themes.dart';
 import '../widgets/evento_card.dart';
@@ -10,12 +11,14 @@ class ExplorarScreen extends StatefulWidget {
   final ApiService api;
   final AppThemeOption tema;
   final int refreshToken;
+  final ValueChanged<ContaUsuario?>? onUsuarioChanged;
 
   const ExplorarScreen({
     super.key,
     required this.api,
     required this.tema,
     this.refreshToken = 0,
+    this.onUsuarioChanged,
   });
 
   @override
@@ -202,47 +205,168 @@ class _ExplorarScreenState extends State<ExplorarScreen> {
                 ),
               ),
 
-              // Barra horizontal de Chips de Categoria
+              // Barra de Filtro de Categoria (Combo/Select) + Toggle de Resolvidos
               SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 54,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 6,
-                    ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                  child: Row(
                     children: [
-                      ...CategoriaFiltro.todas.map((cat) {
-                        final selecionado = _categoriaSelecionada == cat.slug;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            selected: selecionado,
-                            showCheckmark: false,
-                            label: Text('${cat.icone} ${cat.nome}'),
-                            labelStyle: TextStyle(
-                              fontWeight: selecionado
-                                  ? FontWeight.w800
-                                  : FontWeight.w600,
-                              color: selecionado
-                                  ? widget.tema.seedColor
-                                  : const Color(0xFF334155),
-                            ),
-                            onSelected: (_) => _selecionarCategoria(cat.slug),
+                      // Seletor Dropdown/Combo de Categorias
+                      Expanded(
+                        child: Container(
+                          height: 42,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.03),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
                           ),
-                        );
-                      }),
-                      FilterChip(
-                        selected: _incluirResolvidos,
-                        showCheckmark: false,
-                        label: const Text('✅ Resolvidos'),
-                        onSelected: (v) {
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _categoriaSelecionada,
+                              isExpanded: true,
+                              borderRadius: BorderRadius.circular(16),
+                              dropdownColor: Colors.white,
+                              icon: Icon(
+                                Icons.unfold_more_rounded,
+                                size: 20,
+                                color: widget.tema.seedColor,
+                              ),
+                              selectedItemBuilder: (context) {
+                                return CategoriaFiltro.todas.map((cat) {
+                                  final label = cat.slug.isEmpty
+                                      ? 'Todas as Categorias'
+                                      : cat.nome;
+                                  return Row(
+                                    children: [
+                                      Text(cat.icone, style: const TextStyle(fontSize: 15)),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Categoria: $label',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: cat.slug.isEmpty
+                                                ? const Color(0xFF334155)
+                                                : widget.tema.seedColor,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                }).toList();
+                              },
+                              items: CategoriaFiltro.todas.map((cat) {
+                                final sel = _categoriaSelecionada == cat.slug;
+                                final label = cat.slug.isEmpty
+                                    ? 'Todas as Categorias'
+                                    : cat.nome;
+                                return DropdownMenuItem<String>(
+                                  value: cat.slug,
+                                  child: Row(
+                                    children: [
+                                      Text(cat.icone, style: const TextStyle(fontSize: 16)),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          label,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: sel ? FontWeight.w800 : FontWeight.w500,
+                                            color: sel ? widget.tema.seedColor : const Color(0xFF1E293B),
+                                          ),
+                                        ),
+                                      ),
+                                      if (sel)
+                                        Icon(
+                                          Icons.check_rounded,
+                                          size: 17,
+                                          color: widget.tema.seedColor,
+                                        ),
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (novoSlug) {
+                                if (novoSlug == null) return;
+                                _selecionarCategoria(novoSlug);
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Botão Alternador de 'Resolvidos'
+                      InkWell(
+                        onTap: () {
                           setState(() {
-                            _incluirResolvidos = v;
+                            _incluirResolvidos = !_incluirResolvidos;
                             _carregarEventos();
                           });
                         },
+                        borderRadius: BorderRadius.circular(14),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          height: 42,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          decoration: BoxDecoration(
+                            color: _incluirResolvidos
+                                ? const Color(0xFFDCFCE7)
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: _incluirResolvidos
+                                  ? const Color(0xFF86EFAC)
+                                  : const Color(0xFFE2E8F0),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.03),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _incluirResolvidos
+                                    ? Icons.check_circle_rounded
+                                    : Icons.check_circle_outline_rounded,
+                                size: 16,
+                                color: _incluirResolvidos
+                                    ? const Color(0xFF15803D)
+                                    : const Color(0xFF64748B),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Resolvidos',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: _incluirResolvidos
+                                      ? FontWeight.w800
+                                      : FontWeight.w600,
+                                  color: _incluirResolvidos
+                                      ? const Color(0xFF15803D)
+                                      : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -340,6 +464,7 @@ class _ExplorarScreenState extends State<ExplorarScreen> {
                           context,
                           evento: evento,
                           api: widget.api,
+                          onUsuarioChanged: widget.onUsuarioChanged,
                         ),
                       );
                     },
