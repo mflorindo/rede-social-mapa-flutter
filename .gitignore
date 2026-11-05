@@ -86,3 +86,6 @@ coverage/
 
 # Environment
 .env
+
+# Imagens temporárias (clip2png)
+temp_imagem/
