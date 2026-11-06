@@ -8,7 +8,9 @@ import '../models/anuncio.dart';
 import '../models/evento.dart';
 import '../models/usuario.dart';
 import '../services/api_service.dart';
+import '../services/localizacao_service.dart';
 import '../theme/app_themes.dart';
+import '../widgets/criar_relato_sheet.dart';
 import '../widgets/evento_detalhe_sheet.dart';
 
 class MapaRadarScreen extends StatefulWidget {
@@ -32,8 +34,7 @@ class MapaRadarScreen extends StatefulWidget {
 class _MapaRadarScreenState extends State<MapaRadarScreen> {
   static const LatLng _centroInicial = LatLng(-27.5935, -48.6138);
   static const double _zoomInicial = 15.0;
-  static const String _tokenMapboxPadrao =
-      '';
+  static const String _tokenMapboxPadrao = '';
 
   final MapController _mapController = MapController();
   Timer? _debounceArraste;
@@ -47,10 +48,10 @@ class _MapaRadarScreenState extends State<MapaRadarScreen> {
   String _estiloMapbox = 'streets-v12';
 
   static const Map<String, String> _estilosMapboxDisponiveis = {
-    'streets-v12': '🗺️ Mapbox Ruas (Padrão)',
-    'satellite-streets-v12': '🛰️ Mapbox Satélite + Ruas',
-    'light-v11': '☀️ Mapbox Claro',
-    'dark-v11': '🌙 Mapbox Noturno',
+    'streets-v12': '🗺️ Mapa Ruas (Padrão)',
+    'satellite-streets-v12': '🛰️ Mapa Satélite + Ruas',
+    'light-v11': '☀️ Mapa Claro',
+    'dark-v11': '🌙 Mapa Noturno',
   };
 
   double _zoomAtual = _zoomInicial;
@@ -205,6 +206,76 @@ class _MapaRadarScreenState extends State<MapaRadarScreen> {
     _buscarEventosDaArea();
   }
 
+  Future<void> _irParaMinhaLocalizacaoGps() async {
+    if (!_mapaPronto) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Buscando sinal GPS do celular...'),
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    try {
+      final pos = await LocalizacaoService.obterPosicaoAtual();
+      if (!mounted) return;
+      final ponto = LatLng(pos.latitude, pos.longitude);
+      _mapController.move(ponto, 16.5);
+      setState(() {
+        _zoomAtual = 16.5;
+        _limitesVisiveis = _mapController.camera.visibleBounds;
+      });
+      _buscarEventosDaArea();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFFDC2626),
+        ),
+      );
+    }
+  }
+
+  Future<void> _abrirCriacaoRelato() async {
+    final pontoSugerido = _mapaPronto ? _mapController.camera.center : _centroInicial;
+    final novoEvento = await CriarRelatoSheet.abrir(
+      context,
+      api: widget.api,
+      posicaoSugerida: pontoSugerido,
+      onUsuarioChanged: widget.onUsuarioChanged,
+      corTema: widget.tema.seedColor,
+    );
+
+    if (novoEvento != null && mounted) {
+      final pontoEvento = LatLng(novoEvento.lat, novoEvento.lng);
+      _mapController.move(pontoEvento, 16.5);
+      setState(() {
+        _eventos = [
+          novoEvento,
+          ..._eventos.where((e) => e.id != novoEvento.id),
+        ];
+        _eventoSelecionado = novoEvento;
+        _clusterSelecionado = [novoEvento];
+        _indiceNoCluster = 0;
+        _zoomAtual = 16.5;
+        _limitesVisiveis = _mapController.camera.visibleBounds;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '🎉 Relato "${novoEvento.categoriaNome}" publicado com sucesso!',
+          ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFF16A34A),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
   List<_ClusterGeografico> _agruparEventosPorZoom(List<Evento> eventos) {
     if (eventos.isEmpty) return const [];
 
@@ -276,16 +347,27 @@ class _MapaRadarScreenState extends State<MapaRadarScreen> {
               onPositionChanged: _aoMoverOuDarZoom,
             ),
             children: [
-              TileLayer(
-                key: ValueKey('mapbox_${_estiloMapbox}_$tokenMapboxAtivo'),
-                urlTemplate:
-                    'https://api.mapbox.com/styles/v1/mapbox/$_estiloMapbox/tiles/512/{z}/{x}/{y}@2x?access_token=$tokenMapboxAtivo',
-                tileDimension: 512,
-                zoomOffset: -1,
-                maxNativeZoom: 20,
-                userAgentPackageName: 'br.com.redesocialmapa.mobile',
-                tileProvider: NetworkTileProvider(silenceExceptions: true),
-              ),
+              if (tokenMapboxAtivo.isNotEmpty)
+                TileLayer(
+                  key: ValueKey('mapbox_${_estiloMapbox}_$tokenMapboxAtivo'),
+                  urlTemplate:
+                      'https://api.mapbox.com/styles/v1/mapbox/$_estiloMapbox/tiles/512/{z}/{x}/{y}@2x?access_token=$tokenMapboxAtivo',
+                  tileDimension: 512,
+                  zoomOffset: -1,
+                  maxNativeZoom: 20,
+                  userAgentPackageName: 'br.com.redesocialmapa.mobile',
+                  tileProvider: NetworkTileProvider(silenceExceptions: true),
+                )
+              else
+                TileLayer(
+                  key: const ValueKey('osm_fallback'),
+                  urlTemplate:
+                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  tileDimension: 256,
+                  maxNativeZoom: 19,
+                  userAgentPackageName: 'br.com.redesocialmapa.mobile',
+                  tileProvider: NetworkTileProvider(silenceExceptions: true),
+                ),
 
               // Camada de Pinos Patrocinados (Parceiros da Cidade)
               if (_exibirPinosPatrocinados)
@@ -667,9 +749,20 @@ class _MapaRadarScreenState extends State<MapaRadarScreen> {
                 const Divider(height: 1, indent: 6, endIndent: 6),
                 IconButton(
                   visualDensity: VisualDensity.compact,
+                  tooltip: 'Minha localização GPS atual',
+                  icon: const Icon(
+                    Icons.gps_fixed_rounded,
+                    size: 18,
+                    color: Color(0xFF16A34A),
+                  ),
+                  onPressed: _irParaMinhaLocalizacaoGps,
+                ),
+                const Divider(height: 1, indent: 6, endIndent: 6),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
                   tooltip: 'Voltar para área central com relatos',
                   icon: Icon(
-                    Icons.my_location_rounded,
+                    Icons.location_city_rounded,
                     size: 18,
                     color: widget.tema.seedColor,
                   ),
@@ -677,7 +770,7 @@ class _MapaRadarScreenState extends State<MapaRadarScreen> {
                 ),
                 const Divider(height: 1, indent: 6, endIndent: 6),
                 PopupMenuButton<String>(
-                  tooltip: 'Estilo do Mapa Mapbox',
+                  tooltip: 'Estilo do Mapa',
                   icon: const Icon(Icons.layers_outlined, size: 19),
                   onSelected: (novoEstilo) {
                     setState(() => _estiloMapbox = novoEstilo);
@@ -817,6 +910,30 @@ class _MapaRadarScreenState extends State<MapaRadarScreen> {
               onFechar: () => setState(() => _anuncioSelecionado = null),
             ),
           ),
+
+        // Botão Flutuante de Criação Rápida de Relato com GPS
+        Positioned(
+          right: 16,
+          bottom: (_eventoSelecionado != null || _anuncioSelecionado != null)
+              ? 180
+              : 20,
+          child: FloatingActionButton.extended(
+            heroTag: 'fab_criar_relato_gps',
+            onPressed: _abrirCriacaoRelato,
+            backgroundColor: widget.tema.seedColor,
+            foregroundColor: Colors.white,
+            elevation: 4,
+            icon: const Icon(Icons.add_location_alt_rounded, size: 21),
+            label: const Text(
+              'Relatar Aqui',
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }

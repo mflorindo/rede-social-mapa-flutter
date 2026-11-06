@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'models/usuario.dart';
 import 'screens/explorar_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/mapa_radar_screen.dart';

@@ -528,4 +528,55 @@ void main() {
     expect(find.text('Já avisei a prefeitura deste buraco!'), findsOneWidget);
     expect(find.text('Comentário publicado! 💬'), findsOneWidget);
   });
+
+  test('ApiService.criarEvento envia payload com categoria, descrição e coordenadas', () async {
+    final mockClient = MockClient((request) async {
+      expect(request.url.path, '/api/eventos/');
+      expect(request.method, 'POST');
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      expect(body['categoria'], 'buraco');
+      expect(body['descricao'], 'Buraco profundo na pista');
+      expect(body['lat'], -27.5932);
+      expect(body['lng'], -48.6138);
+
+      return http.Response(
+        jsonEncode({
+          'id': 99,
+          'categoria': 'buraco',
+          'categoria_nome': 'Buraco na pista',
+          'icone': '🕳️',
+          'status': 'novo',
+          'status_nome': 'Novo',
+          'status_icone': '🆕',
+          'descricao': 'Buraco profundo na pista',
+          'lat': -27.5932,
+          'lng': -48.6138,
+          'estado': 'SC',
+          'cidade': 'São José',
+          'bairro': 'Kobrasol',
+          'autor': 'Marcelo',
+          'curtidas': 0,
+          'dislikes': 0,
+          'comentarios': 0,
+          'foto_capa': null,
+        }),
+        201,
+        headers: {'content-type': 'application/json; charset=utf-8'},
+      );
+    });
+
+    final api = ApiService(client: mockClient, authToken: 'jwt-fake');
+    final evento = await api.criarEvento(
+      categoria: 'buraco',
+      descricao: 'Buraco profundo na pista',
+      lat: -27.5932,
+      lng: -48.6138,
+    );
+
+    expect(evento.id, 99);
+    expect(evento.categoria, 'buraco');
+    expect(evento.descricao, 'Buraco profundo na pista');
+    expect(evento.lat, -27.5932);
+    expect(evento.lng, -48.6138);
+  });
 }

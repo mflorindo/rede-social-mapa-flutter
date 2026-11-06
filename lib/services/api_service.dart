@@ -10,8 +10,7 @@ class ApiService {
   static const String _envUrl = String.fromEnvironment('API_BASE_URL');
   static const String _envMapboxToken = String.fromEnvironment(
     'MAPBOX_TOKEN',
-    defaultValue:
-        '',
+    defaultValue: '',
   );
   static const String _chaveToken = 'auth_token';
   static const String _chaveUsuario = 'usuario_logado';
@@ -391,5 +390,47 @@ class ApiService {
     final dados =
         jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
     return ComentarioEvento.fromJson(dados);
+  }
+
+  /// Publica um novo evento/relato com coordenadas geográficas do usuário
+  Future<Evento> criarEvento({
+    required String categoria,
+    required String descricao,
+    required double lat,
+    required double lng,
+  }) async {
+    final uri = Uri.parse('$baseUrl/eventos/');
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (_authToken != null && _authToken!.isNotEmpty)
+        'Authorization': 'Bearer $_authToken',
+    };
+    final response = await _client.post(
+      uri,
+      headers: headers,
+      body: jsonEncode({
+        'categoria': categoria,
+        'descricao': descricao.trim(),
+        'lat': lat,
+        'lng': lng,
+      }),
+    );
+    if (response.statusCode != 201 && response.statusCode != 200) {
+      String mensagem = 'Erro ao criar relato.';
+      if (response.statusCode == 401) {
+        mensagem = 'Você precisa estar logado para publicar um relato.';
+      } else {
+        try {
+          final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+          if (decoded is Map<String, dynamic> && decoded['detail'] != null) {
+            mensagem = decoded['detail'].toString();
+          }
+        } catch (_) {}
+      }
+      throw Exception(mensagem);
+    }
+    final dados =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    return Evento.fromJson(dados);
   }
 }
